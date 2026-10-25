@@ -50,8 +50,14 @@ let () =
       Printf.printf "Provider reply: %s\n" reply
   | Ok (Connector.Tool_requests _) ->
       Printf.printf "Provider requested a tool.\n"
-  | Error message ->
-      Printf.eprintf "Provider error: %s\n" message);
+  | Error (Connector.Connection_error message) ->
+      Printf.eprintf "Could not connect to provider: %s\n" message
+  | Error (Connector.Provider_error { status_code; message }) ->
+      Printf.eprintf "Provider rejected the request";
+      Option.iter (Printf.eprintf " (status %d)") status_code;
+      Printf.eprintf ": %s\n" message
+  | Error (Connector.Bad_response message) ->
+      Printf.eprintf "Unexpected provider response: %s\n" message);
 
   match
     Lwt_main.run

@@ -30,6 +30,11 @@ type response =
       calls : tool_call list;
     }
 
+type error =
+  | Connection_error of string
+  | Provider_error of { status_code : int option; message : string }
+  | Bad_response of string
+
 module type S = sig
-  val complete : request -> (response, string) result Lwt.t
+  val complete : request -> (response, error) result Lwt.t
 end

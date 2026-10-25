@@ -39,6 +39,24 @@ module Test_connector : Connector.S = struct
                (List.length request.messages))))
 end
 
+module Connection_failure : Connector.S = struct
+  let complete _ =
+    Lwt.return (Error (Connector.Connection_error "offline"))
+end
+
+module Provider_failure : Connector.S = struct
+  let complete _ =
+    Lwt.return
+      (Error
+         (Connector.Provider_error
+            { status_code = Some 429; message = "rate limited" }))
+end
+
+module Bad_provider_response : Connector.S = struct
+  let complete _ =
+    Lwt.return (Error (Connector.Bad_response "missing assistant content"))
+end
+
 let agent : Agent.agent =
   {
     id = "agent";
@@ -58,6 +76,13 @@ let expect_invocation_error predicate promise =
   | Error error when predicate error -> ()
   | Error _ -> failwith "Unexpected invocation error"
   | Ok _ -> failwith "Expected an invocation error"
+
+let expect_connector_error expected (module Provider : Connector.S)
+    (request : Connector.request) =
+  match Lwt_main.run (Provider.complete request) with
+  | Error actual when actual = expected -> ()
+  | Error _ -> failwith "Unexpected connector error"
+  | Ok _ -> failwith "Expected a connector error"
 
 let () =
   let user_message = Message.create Agent.User "1" None in
@@ -91,6 +116,16 @@ let () =
   assert (
     Lwt_main.run (Test_connector.complete request)
     = Ok (Connector.Assistant_reply "example-model:1"));
+  expect_connector_error
+    (Connector.Connection_error "offline")
+    (module Connection_failure) request;
+  expect_connector_error
+    (Connector.Provider_error
+       { status_code = Some 429; message = "rate limited" })
+    (module Provider_failure) request;
+  expect_connector_error
+    (Connector.Bad_response "missing assistant content")
+    (module Bad_provider_response) request;
   assert (
     match (model_call, tool_answer) with
     | ( Connector.Assistant_tool_calls { calls = [ call ]; _ },
