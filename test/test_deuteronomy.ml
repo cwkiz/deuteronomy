@@ -30,6 +30,15 @@ end
 
 let failing_tool_implementation = Tool.register (module Failing_tool)
 
+module Test_connector : Connector.S = struct
+  let complete (request : Connector.request) =
+    Lwt.return
+      (Ok
+         (Connector.Assistant_reply
+            (Printf.sprintf "%s:%d" request.model
+               (List.length request.messages))))
+end
+
 let agent : Agent.agent =
   {
     id = "agent";
@@ -55,6 +64,39 @@ let () =
   assert (user_message.role = Agent.User);
   assert (user_message.content = "1");
   assert (user_message.tool = None);
+
+  let model_call : Connector.message =
+    Connector.Assistant_tool_calls
+      {
+        text = None;
+        calls =
+          [
+            {
+              call_id = "call-1";
+              tool_id = "tool";
+              arguments = `Assoc [ ("query", `String "hello") ];
+            };
+          ];
+      }
+  in
+  let tool_answer : Connector.message =
+    Connector.Tool_result
+      { call_id = "call-1"; tool_id = "tool"; content = "hello" }
+  in
+  let request : Connector.request =
+    { model = "example-model"; messages = [ Connector.User_text "hello" ] }
+  in
+  assert (request.model = "example-model");
+  assert (request.messages = [ Connector.User_text "hello" ]);
+  assert (
+    Lwt_main.run (Test_connector.complete request)
+    = Ok (Connector.Assistant_reply "example-model:1"));
+  assert (
+    match (model_call, tool_answer) with
+    | ( Connector.Assistant_tool_calls { calls = [ call ]; _ },
+        Connector.Tool_result { call_id; _ } ) ->
+        call.call_id = call_id
+    | _ -> false);
 
   let with_tool =
     match Registry.add_tool tool_implementation Registry.empty with

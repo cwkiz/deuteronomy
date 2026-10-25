@@ -39,6 +39,20 @@ let registry =
       | Error _ -> failwith "agent registration failed")
 
 let () =
+  let request : Connector.request =
+    {
+      model = assistant.model;
+      messages = [ Connector.User_text "Please count the word hello." ];
+    }
+  in
+  (match Lwt_main.run (Deuteronomy_openai.Demo.complete request) with
+  | Ok (Connector.Assistant_reply reply) ->
+      Printf.printf "Provider reply: %s\n" reply
+  | Ok (Connector.Tool_requests _) ->
+      Printf.printf "Provider requested a tool.\n"
+  | Error message ->
+      Printf.eprintf "Provider error: %s\n" message);
+
   match
     Lwt_main.run
       (Registry.invoke registry ~agent_id:assistant.id ~tool_id:"count"
