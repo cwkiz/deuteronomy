@@ -1,4 +1,4 @@
 (executable
- (name sample)
+ (name loop)
  (libraries deuteronomy deuteronomy_openai lwt.unix yojson ppx_deriving_yojson.runtime)
  (preprocess (pps ppx_deriving_yojson)))

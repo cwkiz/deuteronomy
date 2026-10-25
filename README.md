@@ -26,6 +26,15 @@ module Counter_tool : Tool.S = struct
       description = "String byte counter";
     }
 
+  let input_schema =
+    `Assoc
+      [
+        ("type", `String "object");
+        ("properties", `Assoc [ ("text", `Assoc [ ("type", `String "string") ]) ]);
+        ("required", `List [ `String "text" ]);
+        ("additionalProperties", `Bool false);
+      ]
+
   let decode_arguments = Counter_arguments.arguments_of_yojson
 
   let run { Counter_arguments.text } =

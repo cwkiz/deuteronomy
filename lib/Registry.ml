@@ -38,7 +38,8 @@ let remove_tool (tool_id : Agent.tool_id) (registry : t) =
   else
     match
       String_map.bindings registry.agents
-      |> List.find_opt (fun (_, agent) -> List.mem tool_id agent.Agent.tools)
+      |> List.find_opt (fun (_, (agent : Agent.agent)) ->
+             List.mem tool_id agent.Agent.tools)
     with
     | Some (agent_id, _) -> Error (Tool_in_use { tool_id; agent_id })
     | None ->
@@ -53,7 +54,8 @@ let add_agent (agent : Agent.agent) (registry : t) =
         (fun tool_id -> not (String_map.mem tool_id registry.tools))
         agent.Agent.tools
     with
-    | Some tool_id -> Error (Unknown_tool { agent_id = agent.Agent.id; tool_id })
+    | Some tool_id ->
+        Error (Unknown_tool { agent_id = agent.Agent.id; tool_id })
     | None ->
         Ok
           {
@@ -69,7 +71,20 @@ let find_tool_implementation id (registry : t) =
 
 let find_agent id (registry : t) = String_map.find_opt id registry.agents
 
-let invoke (registry : t) ~agent_id ~tool_id ~arguments =
+let tools_for_agent (agent : Agent.agent) (registry : t) =
+  let rec collect specs = function
+    | [] -> Ok (List.rev specs)
+    | tool_id :: remaining -> (
+        match find_tool_implementation tool_id registry with
+        | None ->
+            Error (Unknown_tool { agent_id = agent.Agent.id; tool_id })
+        | Some implementation ->
+            collect (Tool.spec implementation :: specs) remaining)
+  in
+  collect [] agent.Agent.tools
+
+let invoke (registry : t) ~(agent_id : string) ~(tool_id : Agent.tool_id)
+    ~arguments =
   let reject error = Lwt.return (Error error) in
   match find_agent agent_id registry with
   | None -> reject (Agent_not_found agent_id)

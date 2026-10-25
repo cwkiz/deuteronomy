@@ -4,10 +4,13 @@ module type S = sig
   type arguments
 
   val definition : Agent.tool
+  val input_schema : Yojson.Safe.t
   val decode_arguments :
     Yojson.Safe.t -> (arguments, string) result
   val run : arguments -> (string, string) result Lwt.t
 end
+
+type spec = Agent.tool_spec
 
 type implementation
 
@@ -17,6 +20,7 @@ type invocation_error =
 
 val register : (module S) -> implementation
 val definition : implementation -> Agent.tool
+val spec : implementation -> spec
 val invoke :
   implementation ->
   Yojson.Safe.t ->

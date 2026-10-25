@@ -11,6 +11,14 @@ module Lookup_tool : Tool.S = struct
   type arguments = Arguments.arguments
 
   let definition = tool
+  let input_schema =
+    `Assoc
+      [
+        ("type", `String "object");
+        ("properties", `Assoc [ ("query", `Assoc [ ("type", `String "string") ]) ]);
+        ("required", `List [ `String "query" ]);
+        ("additionalProperties", `Bool false);
+      ]
   let decode_arguments = Arguments.arguments_of_yojson
   let run { Arguments.query } = Lwt.return (Ok query)
 end
@@ -24,11 +32,52 @@ module Failing_tool : Tool.S = struct
   type arguments = Arguments.arguments
 
   let definition = failing_tool
+  let input_schema = `Assoc []
   let decode_arguments = Arguments.arguments_of_yojson
   let run _ = Lwt.return (Error "deliberate failure")
 end
 
 let failing_tool_implementation = Tool.register (module Failing_tool)
+
+module Agent_provider = struct
+  let calls = ref 0
+
+  let complete (request : Connector.request) =
+    incr calls;
+    assert (request.model = "model");
+    assert (List.length request.tools = 2);
+    assert (
+      match request.tools with
+      | first :: _ ->
+          first.Agent.definition.id = tool.id
+          && first.input_schema = Lookup_tool.input_schema
+      | [] -> false);
+    match !calls with
+    | 1 ->
+        Lwt.return
+          (Ok
+             (Connector.Tool_requests
+                {
+                  text = None;
+                  calls =
+                    [
+                      {
+                        Connector.call_id = "agent-call-1";
+                        tool_id = tool.id;
+                        arguments = `Assoc [ ("query", `String "hello") ];
+                      };
+                    ];
+                }))
+    | _ ->
+        assert (
+          List.exists
+            (function
+              | Connector.Tool_result { call_id; content; _ } ->
+                  call_id = "agent-call-1" && content = "hello"
+              | _ -> false)
+            request.messages);
+        Lwt.return (Ok (Connector.Assistant_reply "Finished with hello"))
+end
 
 module Test_connector : Connector.S = struct
   let complete (request : Connector.request) =
@@ -56,6 +105,8 @@ module Bad_provider_response : Connector.S = struct
   let complete _ =
     Lwt.return (Error (Connector.Bad_response "missing assistant content"))
 end
+
+module Openai_provider : Connector.S = Deuteronomy_openai.Provider
 
 let agent : Agent.agent =
   {
@@ -109,7 +160,11 @@ let () =
       { call_id = "call-1"; tool_id = "tool"; content = "hello" }
   in
   let request : Connector.request =
-    { model = "example-model"; messages = [ Connector.User_text "hello" ] }
+    {
+      model = "example-model";
+      messages = [ Connector.User_text "hello" ];
+      tools = [];
+    }
   in
   assert (request.model = "example-model");
   assert (request.messages = [ Connector.User_text "hello" ]);
@@ -126,6 +181,13 @@ let () =
   expect_connector_error
     (Connector.Bad_response "missing assistant content")
     (module Bad_provider_response) request;
+  expect_connector_error
+    (Connector.Provider_error
+       {
+         status_code = None;
+         message = "OpenAI provider is not implemented yet";
+       })
+    (module Openai_provider) request;
   assert (
     match (model_call, tool_answer) with
     | ( Connector.Assistant_tool_calls { calls = [ call ]; _ },
@@ -150,6 +212,7 @@ let () =
     type arguments = Arguments.arguments
 
     let definition = conflicting_tool
+    let input_schema = `Assoc []
     let decode_arguments = Arguments.arguments_of_yojson
     let run { Arguments.query } = Lwt.return (Ok query)
   end in
@@ -170,6 +233,29 @@ let () =
     | Ok registry -> registry
     | Error _ -> failwith "agent registration failed"
   in
+  Agent_provider.calls := 0;
+  assert (
+    Lwt_main.run
+      (Agent.run ~provider:(module Agent_provider) agent
+         ~tools:
+           (match Registry.tools_for_agent agent with_tools with
+           | Ok tools -> tools
+           | Error _ -> failwith "agent tool lookup failed")
+         [ Connector.User_text "hello" ])
+    = Ok
+        (Connector.Tool_requests
+           {
+             text = None;
+             calls =
+               [
+                 {
+                   Connector.call_id = "agent-call-1";
+                   tool_id = tool.id;
+                   arguments = `Assoc [ ("query", `String "hello") ];
+                 };
+               ];
+           }));
+  assert (!Agent_provider.calls = 1);
   assert (Registry.find_agent agent.id with_agent = Some agent);
   assert (Registry.find_agent agent.id Registry.empty = None);
   expect_error (Registry.Duplicate_agent agent.id)

@@ -25,6 +25,7 @@ val add_agent : Agent.agent -> t -> (t, error) result
 val find_tool : Agent.tool_id -> t -> Agent.tool option
 val find_tool_implementation : Agent.tool_id -> t -> Tool.implementation option
 val find_agent : string -> t -> Agent.agent option
+val tools_for_agent : Agent.agent -> t -> (Tool.spec list, error) result
 
 val invoke :
   t ->
