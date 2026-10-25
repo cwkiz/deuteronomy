@@ -1,3 +1,4 @@
 (executable
  (name sample)
- (libraries deuteronomy))
+ (libraries deuteronomy lwt.unix yojson ppx_deriving_yojson.runtime)
+ (preprocess (pps ppx_deriving_yojson)))

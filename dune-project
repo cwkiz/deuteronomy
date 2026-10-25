@@ -5,22 +5,21 @@
 (generate_opam_files true)
 
 (source
- (github username/reponame))
+ (github cwkiz/deuteronomy))
 
-(authors "Author Name <author@example.com>")
+(authors "Demetrius <illegalbassmedicine@proton.me>")
 
-(maintainers "Maintainer Name <maintainer@example.com>")
+(maintainers "Demetrius <illegalbassmedicine@proton.me>")
 
 (license LICENSE)
 
-(documentation https://url/to/documentation)
+(documentation https://github.com/cwkiz/deuteronomy)
 
 (package
  (name deuteronomy)
- (synopsis "A short synopsis")
- (description "A longer description")
- (depends ocaml)
- (tags
-  ("add topics" "to describe" your project)))
+ (synopsis "Easy agents in OCaml")
+ (description "Easy agents in OCaml")
+ (depends ocaml lwt yojson ppx_deriving_yojson)
+ (tags ("llm" "agents")))
 
 ; See the complete stanza docs at https://dune.readthedocs.io/en/stable/reference/dune-project/index.html

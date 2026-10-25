@@ -12,6 +12,13 @@ type error =
   | Tool_not_found of Agent.tool_id
   | Tool_in_use of { tool_id : Agent.tool_id; agent_id : string }
 
+type invocation_error =
+  | Agent_not_found of string
+  | Tool_not_allowed of { agent_id : string; tool_id : Agent.tool_id }
+  | Tool_not_registered of Agent.tool_id
+  | Invalid_arguments of string
+  | Tool_failed of string
+
 let empty = { tools = String_map.empty; agents = String_map.empty }
 
 let add_tool (tool : Tool.implementation) (registry : t) =
@@ -61,3 +68,20 @@ let find_tool_implementation id (registry : t) =
   String_map.find_opt id registry.tools
 
 let find_agent id (registry : t) = String_map.find_opt id registry.agents
+
+let invoke (registry : t) ~agent_id ~tool_id ~arguments =
+  let reject error = Lwt.return (Error error) in
+  match find_agent agent_id registry with
+  | None -> reject (Agent_not_found agent_id)
+  | Some agent when not (List.mem tool_id agent.Agent.tools) ->
+      reject (Tool_not_allowed { agent_id; tool_id })
+  | Some _ -> (
+      match find_tool_implementation tool_id registry with
+      | None -> reject (Tool_not_registered tool_id)
+      | Some implementation ->
+          Tool.invoke implementation arguments
+          |> Lwt.map (function
+               | Ok result -> Ok result
+               | Error (Tool.Invalid_arguments message) ->
+                   Error (Invalid_arguments message)
+               | Error (Tool.Tool_failed message) -> Error (Tool_failed message)))

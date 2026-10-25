@@ -5,14 +5,16 @@ description: "Easy agents in OCaml"
 maintainer: ["Demetrius <illegalbassmedicine@proton.me>"]
 authors: ["Demetrius <illegalbassmedicine@proton.me>"]
 license: "LICENSE"
-tags: ["llm", "agents"]
+tags: ["llm" "agents"]
 homepage: "https://github.com/cwkiz/deuteronomy"
 doc: "https://github.com/cwkiz/deuteronomy"
-bug-reports: "https://github.com/cwkiz/deuteronomyissues"
+bug-reports: "https://github.com/cwkiz/deuteronomy/issues"
 depends: [
   "dune" {>= "3.21"}
   "ocaml"
   "lwt"
+  "yojson"
+  "ppx_deriving_yojson"
   "odoc" {with-doc}
 ]
 build: [
@@ -29,5 +31,5 @@ build: [
     "@doc" {with-doc}
   ]
 ]
-dev-repo: "git+https://github.com/cwkiz/deuteronomy"
+dev-repo: "git+https://github.com/cwkiz/deuteronomy.git"
 x-maintenance-intent: ["(latest)"]
