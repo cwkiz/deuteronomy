@@ -1,0 +1,6 @@
+(library
+ (name deuteronomy)
+ (public_name deuteronomy)
+ (libraries lwt)
+ ; (modules Registry Agent Tool Message)
+ )
