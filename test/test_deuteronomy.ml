@@ -2,7 +2,7 @@ open Deuteronomy
 open Lwt 
 
 let tool : Agent.tool =
-  { id = "nekotinarule34search"; name = "Nekotina r34 search"; description = "Looks up r34." }
+  { id = "tool"; name = "Tool-chan"; description = "hi im tool" }
 
 module Lookup_tool : Tool.S = struct
   let definition = tool
@@ -13,10 +13,10 @@ let tool_implementation = Tool.register (module Lookup_tool)
 
 let agent : Agent.agent =
   {
-    id = "nekotina";
-    name = "Nekotina";
-    description = "Oh thats queen";
-    model = "test-model";
+    id = "agent";
+    name = "Agent";
+    description = "hi im agent";
+    model = "model";
     tools = [ tool.id ];
   }
 
@@ -26,9 +26,9 @@ let expect_error expected = function
   | Ok _ -> failwith "Expected an error"
 
 let () =
-  let user_message = Message.create Agent.User "Queen shit bitch!" None in
+  let user_message = Message.create Agent.User "1" None in
   assert (user_message.role = Agent.User);
-  assert (user_message.content = "Queen shit bitch!");
+  assert (user_message.content = "1");
   assert (user_message.tool = None);
 
   let with_tool =
