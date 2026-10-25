@@ -6,30 +6,17 @@ type role =
   | System
   | Tool
 
-type tool_id = string
-
-type tool = {
-  id : tool_id;
-  name : string;
-  description : string;
-}
-
 type agent = {
   id : string;
   name : string;
   description : string;
   model : string;
-  tools : tool_id list;
-}
-
-type tool_spec = {
-  definition : tool;
-  input_schema : Yojson.Safe.t;
+  tools : Tool.id list;
 }
 
 type tool_call = {
   call_id : string;
-  tool_id : tool_id;
+  tool_id : Tool.id;
   arguments : Yojson.Safe.t;
 }
 
@@ -43,14 +30,14 @@ type message =
     }
   | Tool_result of {
       call_id : string;
-      tool_id : tool_id;
+      tool_id : Tool.id;
       content : string;
     }
 
 type request = {
   model : string;
   messages : message list;
-  tools : tool_spec list;
+  tools : Tool.spec list;
 }
 
 type response =

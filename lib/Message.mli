@@ -1,7 +1,7 @@
 type message = {
   role : Agent.role;
   content : string;
-  tool : Agent.tool option;
+  tool : Tool.definition option;
 }
 
-val create : Agent.role -> string -> Agent.tool option -> message
+val create : Agent.role -> string -> Tool.definition option -> message

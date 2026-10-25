@@ -8,14 +8,14 @@ type t = {
 type error =
   | Duplicate_agent of string
   | Duplicate_tool of string
-  | Unknown_tool of { agent_id : string; tool_id : Agent.tool_id }
-  | Tool_not_found of Agent.tool_id
-  | Tool_in_use of { tool_id : Agent.tool_id; agent_id : string }
+  | Unknown_tool of { agent_id : string; tool_id : Tool.id }
+  | Tool_not_found of Tool.id
+  | Tool_in_use of { tool_id : Tool.id; agent_id : string }
 
 type invocation_error =
   | Agent_not_found of string
-  | Tool_not_allowed of { agent_id : string; tool_id : Agent.tool_id }
-  | Tool_not_registered of Agent.tool_id
+  | Tool_not_allowed of { agent_id : string; tool_id : Tool.id }
+  | Tool_not_registered of Tool.id
   | Invalid_arguments of string
   | Tool_failed of string
 
@@ -23,16 +23,16 @@ let empty = { tools = String_map.empty; agents = String_map.empty }
 
 let add_tool (tool : Tool.implementation) (registry : t) =
   let definition = Tool.definition tool in
-  if String_map.mem definition.Agent.id registry.tools then
-    Error (Duplicate_tool definition.Agent.id)
+  if String_map.mem definition.Tool.id registry.tools then
+    Error (Duplicate_tool definition.Tool.id)
   else
     Ok
       {
         registry with
-        tools = String_map.add definition.Agent.id tool registry.tools;
+        tools = String_map.add definition.Tool.id tool registry.tools;
       }
 
-let remove_tool (tool_id : Agent.tool_id) (registry : t) =
+let remove_tool (tool_id : Tool.id) (registry : t) =
   if not (String_map.mem tool_id registry.tools) then
     Error (Tool_not_found tool_id)
   else
@@ -83,7 +83,7 @@ let tools_for_agent (agent : Agent.agent) (registry : t) =
   in
   collect [] agent.Agent.tools
 
-let invoke (registry : t) ~(agent_id : string) ~(tool_id : Agent.tool_id)
+let invoke (registry : t) ~(agent_id : string) ~(tool_id : Tool.id)
     ~arguments =
   let reject error = Lwt.return (Error error) in
   match find_agent agent_id registry with

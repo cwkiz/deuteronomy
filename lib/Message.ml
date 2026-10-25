@@ -1,8 +1,7 @@
 type message = {
   role : Agent.role;
   content : string;
-  tool : Agent.tool option;
+  tool : Tool.definition option;
 }
 
 let create role content tool = { role; content; tool }
-

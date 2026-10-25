@@ -1,6 +1,6 @@
 type tool_call = Agent.tool_call = {
   call_id : string;
-  tool_id : Agent.tool_id;
+  tool_id : Tool.id;
   arguments : Yojson.Safe.t;
 }
 
@@ -14,14 +14,14 @@ type message = Agent.message =
     }
   | Tool_result of {
       call_id : string;
-      tool_id : Agent.tool_id;
+      tool_id : Tool.id;
       content : string;
     }
 
 type request = Agent.request = {
   model : string;
   messages : message list;
-  tools : Agent.tool_spec list;
+  tools : Tool.spec list;
 }
 
 type response = Agent.response =

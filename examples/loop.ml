@@ -8,7 +8,7 @@ end
 module Counter_tool : Tool.S = struct
   type arguments = Counter_arguments.arguments
 
-  let definition : Agent.tool =
+  let definition : Tool.definition =
     {
       id = "count";
       name = "Count";

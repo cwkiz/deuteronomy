@@ -4,7 +4,7 @@ module Arguments = struct
   type arguments = { query : string } [@@deriving yojson]
 end
 
-let tool : Agent.tool =
+let tool : Tool.definition =
   { id = "tool"; name = "Tool"; description = "Returns the supplied query." }
 
 module Lookup_tool : Tool.S = struct
@@ -25,7 +25,7 @@ end
 
 let tool_implementation = Tool.register (module Lookup_tool)
 
-let failing_tool : Agent.tool =
+let failing_tool : Tool.definition =
   { id = "failing"; name = "Failing"; description = "Always fails." }
 
 module Failing_tool : Tool.S = struct
@@ -49,7 +49,7 @@ module Agent_provider = struct
     assert (
       match request.tools with
       | first :: _ ->
-          first.Agent.definition.id = tool.id
+          first.Tool.definition.id = tool.id
           && first.input_schema = Lookup_tool.input_schema
       | [] -> false);
     match !calls with

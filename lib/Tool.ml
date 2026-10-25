@@ -1,15 +1,27 @@
 open Lwt
+
+type id = string
+
+type definition = {
+  id : id;
+  name : string;
+  description : string;
+}
+
+type spec = {
+  definition : definition;
+  input_schema : Yojson.Safe.t;
+}
+
 module type S = sig
   type arguments
 
-  val definition : Agent.tool
+  val definition : definition
   val input_schema : Yojson.Safe.t
   val decode_arguments :
     Yojson.Safe.t -> (arguments, string) result
   val run : arguments -> (string, string) result Lwt.t
 end
-
-type spec = Agent.tool_spec
 
 type implementation = (module S)
 
@@ -22,10 +34,7 @@ let register (implementation : (module S)) : implementation = implementation
 let definition (module Tool : S) = Tool.definition
 
 let spec (module Tool : S) =
-  {
-    Agent.definition = Tool.definition;
-    input_schema = Tool.input_schema;
-  }
+  { definition = Tool.definition; input_schema = Tool.input_schema }
 
 let invoke (module Tool : S) json =
   match Tool.decode_arguments json with
