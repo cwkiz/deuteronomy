@@ -34,10 +34,11 @@ let transcript =
     Message.create Agent.System "Count happily." None;
     Message.create Agent.User "Get to counting already." None;
   ]
+let registry = Registry.empty
 
 let () =
   let result =
-    match Registry.add_tool counter_tool Registry.empty with
+    match Registry.add_tool counter_tool registry with
     | Error error -> Error error
     | Ok registry -> Registry.add_agent assistant registry
   in
