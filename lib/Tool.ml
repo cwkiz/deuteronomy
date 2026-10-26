@@ -81,6 +81,12 @@ module Schema = struct
     match (schema, json) with
     | String, `String value -> Ok value
     | Integer, `Int value -> Ok value
+    | Integer, `Float value
+      when Float.is_finite value
+           && Float.trunc value = value
+           && value >= float_of_int min_int
+           && value < float_of_int max_int ->
+        Ok (int_of_float value)
     | Number, `Int value -> Ok (float_of_int value)
     | Number, `Float value -> Ok value
     | Boolean, `Bool value -> Ok value

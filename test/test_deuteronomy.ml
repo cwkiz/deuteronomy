@@ -251,9 +251,29 @@ let () =
   assert (
     integer_spec.input_schema = `Assoc [ ("type", `String "integer") ]);
   assert (
+    Lwt_main.run
+      (Tool.invoke (Tool.register (module Integer_schema_tool)) (`String "1"))
+    |> function Error (`Invalid_arguments _) -> true | _ -> false);
+  assert (
+    Lwt_main.run
+      (Tool.invoke (Tool.register (module Integer_schema_tool)) (`Int 1))
+    = Ok "1");
+  assert (
+    Lwt_main.run
+      (Tool.invoke (Tool.register (module Integer_schema_tool)) (`Float 1.0))
+    = Ok "1");
+  assert (
     match
       Lwt_main.run
-        (Tool.invoke (Tool.register (module Integer_schema_tool)) (`Float 1.0))
+        (Tool.invoke (Tool.register (module Integer_schema_tool)) (`Float 1.5))
+    with
+    | Error (`Invalid_arguments _) -> true
+    | _ -> false);
+  assert (
+    match
+      Lwt_main.run
+        (Tool.invoke (Tool.register (module Integer_schema_tool))
+           (`Float infinity))
     with
     | Error (`Invalid_arguments _) -> true
     | _ -> false);
@@ -276,7 +296,11 @@ let () =
             `Assoc
               [
                 ("tags", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
-                ("count", `Assoc [ ("type", `String "integer") ]);
+                ( "count",
+                  `Assoc
+                    [
+                      ("type", `String "integer");
+                    ] );
               ] );
           ("required", `List [ `String "tags" ]);
           ("additionalProperties", `Bool false);
