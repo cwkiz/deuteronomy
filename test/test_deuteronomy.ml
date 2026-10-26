@@ -259,9 +259,12 @@ let () =
       (Tool.invoke (Tool.register (module Integer_schema_tool)) (`Int 1))
     = Ok "1");
   assert (
-    Lwt_main.run
-      (Tool.invoke (Tool.register (module Integer_schema_tool)) (`Float 1.0))
-    = Ok "1");
+    match
+      Lwt_main.run
+        (Tool.invoke (Tool.register (module Integer_schema_tool)) (`Float 1.0))
+    with
+    | Error (`Invalid_arguments _) -> true
+    | _ -> false);
   assert (
     match
       Lwt_main.run
