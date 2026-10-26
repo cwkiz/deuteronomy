@@ -6,23 +6,19 @@ type t = {
 }
 
 type error =
-  | Duplicate_agent of string
-  | Duplicate_tool of string
-  | Unknown_tool of { agent_id : string; tool_id : Tool.id }
-  | Tool_not_found of Tool.id
-  | Tool_in_use of { tool_id : Tool.id; agent_id : string }
+  [ `Duplicate_agent of string
+  | `Duplicate_tool of string
+  | `Unknown_tool of string * Tool.id
+  | `Tool_not_found of Tool.id
+  | `Tool_in_use of Tool.id * string
+  | `Agent_not_found of string ]
 
 type invocation_error =
-  | Agent_not_found of string
-  | Tool_not_allowed of { agent_id : string; tool_id : Tool.id }
-  | Tool_not_registered of Tool.id
-  | Permission_denied of {
-      agent_id : string;
-      tool_id : Tool.id;
-      reason : string;
-    }
-  | Invalid_arguments of string
-  | Tool_failed of string
+  [ `Agent_not_found of string
+  | `Tool_not_allowed of string * Tool.id
+  | `Tool_not_registered of Tool.id
+  | `Permission_denied of string * Tool.id * string
+  | Tool.invocation_error ]
 
 type permission_check =
   agent:Agent.agent ->
@@ -36,7 +32,7 @@ let allow_all ~agent:_ ~tool:_ = Lwt.return (Ok ())
 let add_tool (tool : Tool.implementation) (registry : t) =
   let definition = Tool.definition tool in
   if String_map.mem definition.Tool.id registry.tools then
-    Error (Duplicate_tool definition.Tool.id)
+    Error (`Duplicate_tool definition.Tool.id)
   else
     Ok
       {
@@ -46,20 +42,20 @@ let add_tool (tool : Tool.implementation) (registry : t) =
 
 let remove_tool (tool_id : Tool.id) (registry : t) =
   if not (String_map.mem tool_id registry.tools) then
-    Error (Tool_not_found tool_id)
+    Error (`Tool_not_found tool_id)
   else
     match
       String_map.bindings registry.agents
       |> List.find_opt (fun (_, (agent : Agent.agent)) ->
              List.mem tool_id agent.Agent.tools)
     with
-    | Some (agent_id, _) -> Error (Tool_in_use { tool_id; agent_id })
+    | Some (agent_id, _) -> Error (`Tool_in_use (tool_id, agent_id))
     | None ->
         Ok { registry with tools = String_map.remove tool_id registry.tools }
 
 let add_agent (agent : Agent.agent) (registry : t) =
   if String_map.mem agent.Agent.id registry.agents then
-    Error (Duplicate_agent agent.Agent.id)
+    Error (`Duplicate_agent agent.Agent.id)
   else
     match
       List.find_opt
@@ -67,7 +63,7 @@ let add_agent (agent : Agent.agent) (registry : t) =
         agent.Agent.tools
     with
     | Some tool_id ->
-        Error (Unknown_tool { agent_id = agent.Agent.id; tool_id })
+        Error (`Unknown_tool (agent.Agent.id, tool_id))
     | None ->
         Ok
           {
@@ -83,13 +79,19 @@ let find_tool_implementation id (registry : t) =
 
 let find_agent id (registry : t) = String_map.find_opt id registry.agents
 
+let remove_agent id (registry : t) =
+  if not (String_map.mem id registry.agents) then
+    Error (`Agent_not_found id)
+  else
+    Ok { registry with agents = String_map.remove id registry.agents }
+
 let tools_for_agent (agent : Agent.agent) (registry : t) =
   let rec collect specs = function
     | [] -> Ok (List.rev specs)
     | tool_id :: remaining -> (
         match find_tool_implementation tool_id registry with
         | None ->
-            Error (Unknown_tool { agent_id = agent.Agent.id; tool_id })
+            Error (`Unknown_tool (agent.Agent.id, tool_id))
         | Some implementation ->
             collect (Tool.spec implementation :: specs) remaining)
   in
@@ -97,24 +99,22 @@ let tools_for_agent (agent : Agent.agent) (registry : t) =
 
 let invoke ?(permission_check = allow_all) (registry : t) ~(agent_id : string)
     ~(tool_id : Tool.id) ~arguments =
-  let reject error = Lwt.return (Error error) in
+  let reject (error : invocation_error) = Lwt.return (Error error) in
   match find_agent agent_id registry with
-  | None -> reject (Agent_not_found agent_id)
+  | None -> reject (`Agent_not_found agent_id)
   | Some agent when not (List.mem tool_id agent.Agent.tools) ->
-      reject (Tool_not_allowed { agent_id; tool_id })
+      reject (`Tool_not_allowed (agent_id, tool_id))
   | Some agent -> (
       match find_tool_implementation tool_id registry with
-      | None -> reject (Tool_not_registered tool_id)
+      | None -> reject (`Tool_not_registered tool_id)
       | Some implementation ->
           let definition = Tool.definition implementation in
           Lwt.bind (permission_check ~agent ~tool:definition) (function
             | Error reason ->
-                reject (Permission_denied { agent_id; tool_id; reason })
+                reject (`Permission_denied (agent_id, tool_id, reason))
             | Ok () ->
                 Tool.invoke implementation arguments
                 |> Lwt.map (function
                      | Ok result -> Ok result
-                     | Error (Tool.Invalid_arguments message) ->
-                         Error (Invalid_arguments message)
-                     | Error (Tool.Tool_failed message) ->
-                         Error (Tool_failed message))))
+                     | Error error ->
+                         Error (error :> invocation_error))))

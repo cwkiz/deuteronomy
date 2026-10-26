@@ -9,11 +9,11 @@ open Deuteronomy
 ```
 
 A tool is a module implemented by satisfying the Tool.S interface.  
-Tools accept JSON arguments that are then decoded, and the tool itself's function is wrapped around an Lwt promise. Here's a sample of a valid tool module:
+Tools accept JSON arguments decoded by a typed schema and is compiled to Yojson for the provider. The tool itself's function is wrapped around an Lwt promise. Here's a sample of a valid tool module (for this example we're not using OpenAI schema specification):
 
 ```ocaml
 module Counter_arguments = struct
-  type arguments = { text : string } [@@deriving yojson]
+  type arguments = { text : string }
 end
 
 module Counter_tool : Tool.S = struct
@@ -26,16 +26,11 @@ module Counter_tool : Tool.S = struct
       description = "String byte counter";
     }
 
-  let input_schema =
-    `Assoc
-      [
-        ("type", `String "object");
-        ("properties", `Assoc [ ("text", `Assoc [ ("type", `String "string") ]) ]);
-        ("required", `List [ `String "text" ]);
-        ("additionalProperties", `Bool false);
-      ]
-
-  let decode_arguments = Counter_arguments.arguments_of_yojson
+  let schema =
+    Tool.Schema.map
+      (fun (text, ()) -> { Counter_arguments.text })
+      (Tool.Schema.object_
+         (Tool.Schema.required "text" Tool.Schema.string Tool.Schema.empty))
 
   let run { Counter_arguments.text } =
     Lwt.return (Ok (string_of_int (String.length text)))
@@ -74,15 +69,15 @@ let () =
          ~arguments:(`Assoc [ ("text", `String "hello") ]))
   with
   | Ok output -> Printf.printf "Tool result: %s\n" output
-  | Error (Registry.Agent_not_found id) ->
+  | Error (`Agent_not_found id) ->
       Printf.eprintf "Agent not found: %s\n" id
-  | Error (Registry.Tool_not_allowed { agent_id; tool_id }) ->
+  | Error (`Tool_not_allowed (agent_id, tool_id)) ->
       Printf.eprintf "Agent %s cannot use tool %s\n" agent_id tool_id
-  | Error (Registry.Tool_not_registered id) ->
+  | Error (`Tool_not_registered id) ->
       Printf.eprintf "Tool not registered: %s\n" id
-  | Error (Registry.Invalid_arguments message) ->
+  | Error (`Invalid_arguments message) ->
       Printf.eprintf "Invalid arguments: %s\n" message
-  | Error (Registry.Tool_failed message) ->
+  | Error (`Tool_failed message) ->
       Printf.eprintf "Tool failed: %s\n" message
 ```
 
@@ -110,8 +105,8 @@ let role_name = function
 
 let transcript =
   [
-    Message.create Agent.System "Count happily." None;
-    Message.create Agent.User "Get to counting already." None;
+    Message.System_text "Count happily.";
+    Message.User_text "Get to counting already.";
   ]
 
 ```

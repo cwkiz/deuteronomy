@@ -1,26 +1,22 @@
 open Lwt.Infix
 
-type role =
-  | Agent
-  | User
-  | System
-  | Tool
+type role = Message.role = Agent | User | System | Tool
 
 type agent = {
   id : string;
-  name : string;
-  description : string;
-  model : string;
-  tools : Tool.id list;
+  mutable name : string;
+  mutable description : string;
+  mutable model : string;
+  mutable tools : Tool.id list;
 }
 
-type tool_call = {
+type tool_call = Message.tool_call = {
   call_id : string;
   tool_id : Tool.id;
   arguments : Yojson.Safe.t;
 }
 
-type message =
+type message = Message.message =
   | System_text of string
   | User_text of string
   | Assistant_text of string
@@ -36,7 +32,7 @@ type message =
 
 type request = {
   model : string;
-  messages : message list;
+  messages : message Seq.t;
   tools : Tool.spec list;
 }
 
@@ -47,10 +43,12 @@ type response =
       calls : tool_call list;
     }
 
+type provider_error_detail = { status_code : int option; message : string }
+
 type provider_error =
-  | Connection_error of string
-  | Provider_error of { status_code : int option; message : string }
-  | Bad_response of string
+  [ `Connection_error of string
+  | `Provider_error of provider_error_detail
+  | `Bad_response of string ]
 
 module type Provider = sig
   val complete : request -> (response, provider_error) result Lwt.t

@@ -19,7 +19,7 @@
  (name deuteronomy)
  (synopsis "Easy agents in OCaml")
  (description "Easy agents in OCaml")
- (depends ocaml lwt yojson ppx_deriving_yojson)
+ (depends ocaml lwt yojson)
  (tags ("llm" "agents")))
 
 ; See the complete stanza docs at https://dune.readthedocs.io/en/stable/reference/dune-project/index.html

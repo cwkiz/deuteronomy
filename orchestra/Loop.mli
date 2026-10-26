@@ -1,13 +1,10 @@
 open Deuteronomy
 
 type run_error =
-  | Registry_error of Registry.error
-  | Provider_error of Agent.provider_error
-  | Tool_error of {
-      call_id : string;
-      error : Registry.invocation_error;
-    }
-  | Step_limit_reached
+  [ Registry.error
+  | Agent.provider_error
+  | `Tool_error of string * Registry.invocation_error
+  | `Step_limit_reached ]
 
 val run :
   ?permission_check:Registry.permission_check ->

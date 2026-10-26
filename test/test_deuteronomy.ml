@@ -2,7 +2,11 @@ open Deuteronomy
 open Deuteronomy_orchestra
 
 module Arguments = struct
-  type arguments = { query : string } [@@deriving yojson]
+  type arguments = { query : string }
+end
+
+module Typed_schema_arguments = struct
+  type t = { tags : string list; count : int option }
 end
 
 let tool : Tool.definition =
@@ -14,15 +18,12 @@ module Lookup_tool : Tool.S = struct
   type arguments = Arguments.arguments
 
   let definition = tool
-  let input_schema =
-    `Assoc
-      [
-        ("type", `String "object");
-        ("properties", `Assoc [ ("query", `Assoc [ ("type", `String "string") ]) ]);
-        ("required", `List [ `String "query" ]);
-        ("additionalProperties", `Bool false);
-      ]
-  let decode_arguments = Arguments.arguments_of_yojson
+  let schema =
+    Tool.Schema.map
+      (fun (query, ()) -> { Arguments.query })
+      (Tool.Schema.object_
+         (Tool.Schema.required "query" Tool.Schema.string Tool.Schema.empty))
+
   let run { Arguments.query } =
     incr lookup_tool_runs;
     Lwt.return (Ok query)
@@ -37,12 +38,26 @@ module Failing_tool : Tool.S = struct
   type arguments = Arguments.arguments
 
   let definition = failing_tool
-  let input_schema = `Assoc []
-  let decode_arguments = Arguments.arguments_of_yojson
+  let schema =
+    Tool.Schema.map
+      (fun (query, ()) -> { Arguments.query })
+      (Tool.Schema.object_
+         (Tool.Schema.required "query" Tool.Schema.string Tool.Schema.empty))
+
   let run _ = Lwt.return (Error "deliberate failure")
 end
 
 let failing_tool_implementation = Tool.register (module Failing_tool)
+
+module Integer_schema_tool : Tool.S = struct
+  type arguments = int
+
+  let definition : Tool.definition =
+    { id = "integer-schema"; name = "Integer schema"; description = "Benchmark." }
+
+  let schema = Tool.Schema.integer
+  let run value = Lwt.return (Ok (string_of_int value))
+end
 
 module Agent_provider = struct
   let calls = ref 0
@@ -55,7 +70,8 @@ module Agent_provider = struct
       match request.tools with
       | first :: _ ->
           first.Tool.definition.id = tool.id
-          && first.input_schema = Lookup_tool.input_schema
+          && first.input_schema
+             = Tool.Schema.to_yojson Lookup_tool.schema
       | [] -> false);
     match !calls with
     | 1 ->
@@ -75,7 +91,7 @@ module Agent_provider = struct
                 }))
     | _ ->
         assert (
-          List.exists
+          Seq.exists
             (function
               | Connector.Tool_result { call_id; content; _ } ->
                   call_id = "agent-call-1" && content = "hello"
@@ -90,25 +106,25 @@ module Test_connector : Connector.S = struct
       (Ok
          (Connector.Assistant_reply
             (Printf.sprintf "%s:%d" request.model
-               (List.length request.messages))))
+               (Seq.fold_left (fun count _ -> count + 1) 0 request.messages))))
 end
 
 module Connection_failure : Connector.S = struct
   let complete _ =
-    Lwt.return (Error (Connector.Connection_error "offline"))
+    Lwt.return (Error (`Connection_error "offline"))
 end
 
 module Provider_failure : Connector.S = struct
   let complete _ =
     Lwt.return
       (Error
-         (Connector.Provider_error
-            { status_code = Some 429; message = "rate limited" }))
+         (`Provider_error
+            { Agent.status_code = Some 429; message = "rate limited" }))
 end
 
 module Bad_provider_response : Connector.S = struct
   let complete _ =
-    Lwt.return (Error (Connector.Bad_response "missing assistant content"))
+    Lwt.return (Error (`Bad_response "missing assistant content"))
 end
 
 module Openai_provider : Connector.S = Deuteronomy_openai.Provider
@@ -139,19 +155,19 @@ module Permission_recovery_provider : Connector.S = struct
                 }))
     | 2 ->
         assert (
-          List.exists
+          Seq.exists
             (function
               | Connector.Tool_result
                   { call_id; content; tool_id = result_tool_id } ->
                   call_id = "permission-call"
                   && result_tool_id = tool.id
-                  && content = "Permission denied: requires approval"
+                  && content = "Agent: Permission denied: requires approval"
               | _ -> false)
             request.messages);
         Lwt.return (Ok (Connector.Assistant_reply "recovered"))
     | _ ->
         Lwt.return
-          (Error (Connector.Bad_response "unexpected provider call"))
+          (Error (`Bad_response "unexpected provider call"))
 end
 
 let malformed_call_provider_calls = ref 0
@@ -203,10 +219,97 @@ let expect_connector_error expected (module Provider : Connector.S)
   | Ok _ -> failwith "Expected a connector error"
 
 let () =
-  let user_message = Message.create Agent.User "1" None in
-  assert (user_message.role = Agent.User);
-  assert (user_message.content = "1");
-  assert (user_message.tool = None);
+  let openai_tool =
+    Deuteronomy_openai.Provider.encode_tool (Tool.spec tool_implementation)
+  in
+  assert (
+    openai_tool
+    = `Assoc
+        [
+          ("type", `String "function");
+          ("name", `String "tool");
+          ("description", `String "Returns the supplied query.");
+          ( "parameters",
+            `Assoc
+              [
+                ("type", `String "object");
+                ( "properties",
+                  `Assoc
+                    [
+                      ( "query",
+                        `Assoc [ ("type", `String "string") ] );
+                    ] );
+                ("required", `List [ `String "query" ]);
+                ("additionalProperties", `Bool false);
+              ] );
+        ]);
+  assert (
+    Deuteronomy_openai.Provider.encode_tools [ Tool.spec tool_implementation ]
+    = `List [ openai_tool ]);
+
+  let integer_spec = Tool.spec (Tool.register (module Integer_schema_tool)) in
+  assert (
+    integer_spec.input_schema = `Assoc [ ("type", `String "integer") ]);
+  assert (
+    match
+      Lwt_main.run
+        (Tool.invoke (Tool.register (module Integer_schema_tool)) (`Float 1.0))
+    with
+    | Error (`Invalid_arguments _) -> true
+    | _ -> false);
+
+  let typed_schema =
+    Tool.Schema.map
+      (fun (tags, (count, ())) -> { Typed_schema_arguments.tags; count })
+      (Tool.Schema.object_
+         (Tool.Schema.required "tags"
+            (Tool.Schema.array Tool.Schema.string)
+            (Tool.Schema.optional "count" Tool.Schema.integer
+               Tool.Schema.empty)))
+  in
+  assert (
+    Tool.Schema.to_yojson typed_schema
+    = `Assoc
+        [
+          ("type", `String "object");
+          ( "properties",
+            `Assoc
+              [
+                ("tags", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
+                ("count", `Assoc [ ("type", `String "integer") ]);
+              ] );
+          ("required", `List [ `String "tags" ]);
+          ("additionalProperties", `Bool false);
+        ]);
+  assert (
+    Tool.Schema.decode typed_schema
+      (`Assoc
+        [
+          ("tags", `List [ `String "one"; `String "two" ]);
+          ("count", `Int 3);
+        ])
+    = Ok { Typed_schema_arguments.tags = [ "one"; "two" ]; count = Some 3 });
+  assert (
+    Tool.Schema.decode typed_schema
+      (`Assoc [ ("tags", `List [ `String "one" ]) ])
+    = Ok { Typed_schema_arguments.tags = [ "one" ]; count = None });
+  assert (
+    match
+      Tool.Schema.decode typed_schema
+        (`Assoc
+          [
+            ("tags", `List []);
+            ("unexpected", `Bool true);
+          ])
+    with
+    | Error _ -> true
+    | Ok _ -> false);
+
+  let user_message : Message.message = Message.User_text "1" in
+  let agent_message : Agent.message = user_message in
+  let connector_message : Connector.message = user_message in
+  assert (agent_message = Connector.User_text "1");
+  assert (connector_message = Agent.User_text "1");
 
   let model_call : Connector.message =
     Connector.Assistant_tool_calls
@@ -229,30 +332,30 @@ let () =
   let request : Connector.request =
     {
       model = "example-model";
-      messages = [ Connector.User_text "hello" ];
+      messages = List.to_seq [ Connector.User_text "hello" ];
       tools = [];
     }
   in
   assert (request.model = "example-model");
-  assert (request.messages = [ Connector.User_text "hello" ]);
+  assert (List.of_seq request.messages = [ Connector.User_text "hello" ]);
   assert (
     Lwt_main.run (Test_connector.complete request)
     = Ok (Connector.Assistant_reply "example-model:1"));
   expect_connector_error
-    (Connector.Connection_error "offline")
+    (`Connection_error "offline")
     (module Connection_failure) request;
   expect_connector_error
-    (Connector.Provider_error
-       { status_code = Some 429; message = "rate limited" })
+    (`Provider_error
+       { Agent.status_code = Some 429; message = "rate limited" })
     (module Provider_failure) request;
   expect_connector_error
-    (Connector.Bad_response "missing assistant content")
+    (`Bad_response "missing assistant content")
     (module Bad_provider_response) request;
   expect_connector_error
-    (Connector.Provider_error
+    (`Provider_error
        {
-         status_code = None;
-         message = "OpenAI provider is not implemented yet";
+         Agent.status_code = None;
+         message = "Stub provider";
        })
     (module Openai_provider) request;
   assert (
@@ -279,15 +382,19 @@ let () =
     type arguments = Arguments.arguments
 
     let definition = conflicting_tool
-    let input_schema = `Assoc []
-    let decode_arguments = Arguments.arguments_of_yojson
+    let schema =
+      Tool.Schema.map
+        (fun (query, ()) -> { Arguments.query })
+        (Tool.Schema.object_
+           (Tool.Schema.required "query" Tool.Schema.string Tool.Schema.empty))
+
     let run { Arguments.query } = Lwt.return (Ok query)
   end in
   let conflicting_implementation = Tool.register (module Conflicting_tool) in
-  expect_error (Registry.Duplicate_tool tool.id)
+  expect_error (`Duplicate_tool tool.id)
     (Registry.add_tool conflicting_implementation with_tool);
   assert (Registry.find_tool tool.id with_tool = Some tool);
-  expect_error (Registry.Tool_not_found "missing")
+  expect_error (`Tool_not_found "missing")
     (Registry.remove_tool "missing" with_tool);
 
   let with_tools =
@@ -308,7 +415,7 @@ let () =
            (match Registry.tools_for_agent agent with_tools with
            | Ok tools -> tools
            | Error _ -> failwith "agent tool lookup failed")
-         [ Connector.User_text "hello" ])
+         (List.to_seq [ Connector.User_text "hello" ]))
     = Ok
         (Connector.Tool_requests
            {
@@ -325,10 +432,23 @@ let () =
   assert (!Agent_provider.calls = 1);
   assert (Registry.find_agent agent.id with_agent = Some agent);
   assert (Registry.find_agent agent.id Registry.empty = None);
-  expect_error (Registry.Duplicate_agent agent.id)
+  expect_error (`Duplicate_agent agent.id)
     (Registry.add_agent agent with_agent);
+  agent.name <- "Updated agent";
+  assert (
+    match Registry.find_agent agent.id with_agent with
+    | Some registered -> registered.name = "Updated agent"
+    | None -> false);
+  agent.name <- "Agent";
+  (match Registry.remove_agent agent.id with_agent with
+  | Ok registry ->
+      assert (Registry.find_agent agent.id registry = None);
+      assert (Registry.find_agent agent.id with_agent = Some agent)
+  | Error _ -> failwith "agent removal failed");
+  expect_error (`Agent_not_found "missing")
+    (Registry.remove_agent "missing" with_agent);
   expect_error
-    (Registry.Tool_in_use { tool_id = tool.id; agent_id = agent.id })
+    (`Tool_in_use (tool.id, agent.id))
     (Registry.remove_tool tool.id with_agent);
   (match Registry.remove_tool tool.id with_tool with
   | Ok registry -> assert (Registry.find_tool tool.id registry = None)
@@ -336,7 +456,7 @@ let () =
 
   let missing_tool_agent = { agent with tools = [ "missing" ] } in
   expect_error
-    (Registry.Unknown_tool { agent_id = agent.id; tool_id = "missing" })
+    (`Unknown_tool (agent.id, "missing"))
     (Registry.add_agent missing_tool_agent with_tool);
 
   let arguments = `Assoc [ ("query", `String "hello") ] in
@@ -346,11 +466,11 @@ let () =
          ~arguments)
     = Ok "hello");
   expect_invocation_error
-    (function Registry.Invalid_arguments _ -> true | _ -> false)
+    (function `Invalid_arguments _ -> true | _ -> false)
     (Registry.invoke with_agent ~agent_id:agent.id ~tool_id:tool.id
        ~arguments:(`Assoc [ ("query", `Int 4) ]));
   expect_invocation_error
-    (function Registry.Agent_not_found "missing" -> true | _ -> false)
+    (function `Agent_not_found "missing" -> true | _ -> false)
     (Registry.invoke with_agent ~agent_id:"missing" ~tool_id:tool.id
        ~arguments);
   let restricted_agent = { agent with id = "restricted"; tools = [] } in
@@ -361,20 +481,20 @@ let () =
   in
   expect_invocation_error
     (function
-      | Registry.Tool_not_allowed { agent_id; tool_id } ->
+      | `Tool_not_allowed (agent_id, tool_id) ->
           agent_id = restricted_agent.id && tool_id = tool.id
       | _ -> false)
     (Registry.invoke with_restricted_agent ~agent_id:restricted_agent.id
        ~tool_id:tool.id ~arguments);
   expect_invocation_error
-    (function Registry.Tool_failed "deliberate failure" -> true | _ -> false)
+    (function `Tool_failed "deliberate failure" -> true | _ -> false)
     (Registry.invoke with_agent ~agent_id:agent.id ~tool_id:failing_tool.id
        ~arguments);
 
   let runs_before_denial = !lookup_tool_runs in
   expect_invocation_error
     (function
-      | Registry.Permission_denied { agent_id; tool_id; reason } ->
+      | `Permission_denied (agent_id, tool_id, reason) ->
           agent_id = agent.id && tool_id = tool.id
           && reason = "requires approval"
       | _ -> false)
@@ -398,9 +518,7 @@ let () =
        (Loop.run ~provider:(module Malformed_call_provider) with_agent
           agent ~max_steps:3 [ Connector.User_text "hello" ])
    with
-  | Error
-      (Loop.Tool_error
-        { call_id = "invalid-call"; error = Registry.Invalid_arguments _ }) ->
+  | Error (`Tool_error ("invalid-call", `Invalid_arguments _)) ->
       ()
   | _ -> failwith "Malformed tool arguments should abort the agent loop");
   assert (!malformed_call_provider_calls = 1);

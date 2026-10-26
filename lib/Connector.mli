@@ -20,7 +20,7 @@ type message = Agent.message =
 
 type request = Agent.request = {
   model : string;
-  messages : message list;
+  messages : message Seq.t;
   tools : Tool.spec list;
 }
 
@@ -31,9 +31,6 @@ type response = Agent.response =
       calls : tool_call list;
     }
 
-type error = Agent.provider_error =
-  | Connection_error of string
-  | Provider_error of { status_code : int option; message : string }
-  | Bad_response of string
+type error = Agent.provider_error
 
 module type S = Agent.Provider
