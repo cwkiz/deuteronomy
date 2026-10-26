@@ -1,4 +1,5 @@
 open Deuteronomy
+open Deuteronomy_orchestra
 
 module Arguments = struct
   type arguments = { query : string } [@@deriving yojson]
@@ -6,6 +7,8 @@ end
 
 let tool : Tool.definition =
   { id = "tool"; name = "Tool"; description = "Returns the supplied query." }
+
+let lookup_tool_runs = ref 0
 
 module Lookup_tool : Tool.S = struct
   type arguments = Arguments.arguments
@@ -20,7 +23,9 @@ module Lookup_tool : Tool.S = struct
         ("additionalProperties", `Bool false);
       ]
   let decode_arguments = Arguments.arguments_of_yojson
-  let run { Arguments.query } = Lwt.return (Ok query)
+  let run { Arguments.query } =
+    incr lookup_tool_runs;
+    Lwt.return (Ok query)
 end
 
 let tool_implementation = Tool.register (module Lookup_tool)
@@ -107,6 +112,68 @@ module Bad_provider_response : Connector.S = struct
 end
 
 module Openai_provider : Connector.S = Deuteronomy_openai.Provider
+
+let deny_permissions ~agent:_ ~tool:_ =
+  Lwt.return (Error "requires approval")
+
+let permission_recovery_provider_calls = ref 0
+
+module Permission_recovery_provider : Connector.S = struct
+  let complete (request : Connector.request) =
+    incr permission_recovery_provider_calls;
+    match !permission_recovery_provider_calls with
+    | 1 ->
+        Lwt.return
+          (Ok
+             (Connector.Tool_requests
+                {
+                  text = None;
+                  calls =
+                    [
+                      {
+                        Connector.call_id = "permission-call";
+                        tool_id = tool.id;
+                        arguments = `Assoc [ ("query", `String "hello") ];
+                      };
+                    ];
+                }))
+    | 2 ->
+        assert (
+          List.exists
+            (function
+              | Connector.Tool_result
+                  { call_id; content; tool_id = result_tool_id } ->
+                  call_id = "permission-call"
+                  && result_tool_id = tool.id
+                  && content = "Permission denied: requires approval"
+              | _ -> false)
+            request.messages);
+        Lwt.return (Ok (Connector.Assistant_reply "recovered"))
+    | _ ->
+        Lwt.return
+          (Error (Connector.Bad_response "unexpected provider call"))
+end
+
+let malformed_call_provider_calls = ref 0
+
+module Malformed_call_provider : Connector.S = struct
+  let complete (_request : Connector.request) =
+    incr malformed_call_provider_calls;
+    Lwt.return
+      (Ok
+         (Connector.Tool_requests
+            {
+              text = None;
+              calls =
+                [
+                  {
+                    Connector.call_id = "invalid-call";
+                    tool_id = tool.id;
+                    arguments = `Assoc [ ("query", `Int 4) ];
+                  };
+                ];
+            }))
+end
 
 let agent : Agent.agent =
   {
@@ -302,4 +369,39 @@ let () =
   expect_invocation_error
     (function Registry.Tool_failed "deliberate failure" -> true | _ -> false)
     (Registry.invoke with_agent ~agent_id:agent.id ~tool_id:failing_tool.id
-       ~arguments)
+       ~arguments);
+
+  let runs_before_denial = !lookup_tool_runs in
+  expect_invocation_error
+    (function
+      | Registry.Permission_denied { agent_id; tool_id; reason } ->
+          agent_id = agent.id && tool_id = tool.id
+          && reason = "requires approval"
+      | _ -> false)
+    (Registry.invoke ~permission_check:deny_permissions with_agent
+       ~agent_id:agent.id ~tool_id:tool.id ~arguments);
+  assert (!lookup_tool_runs = runs_before_denial);
+
+  permission_recovery_provider_calls := 0;
+  assert (
+    Lwt_main.run
+      (Loop.run ~permission_check:deny_permissions
+         ~provider:(module Permission_recovery_provider) with_agent agent
+         ~max_steps:3 [ Connector.User_text "hello" ])
+    = Ok "recovered");
+  assert (!permission_recovery_provider_calls = 2);
+  assert (!lookup_tool_runs = runs_before_denial);
+
+  malformed_call_provider_calls := 0;
+  (match
+     Lwt_main.run
+       (Loop.run ~provider:(module Malformed_call_provider) with_agent
+          agent ~max_steps:3 [ Connector.User_text "hello" ])
+   with
+  | Error
+      (Loop.Tool_error
+        { call_id = "invalid-call"; error = Registry.Invalid_arguments _ }) ->
+      ()
+  | _ -> failwith "Malformed tool arguments should abort the agent loop");
+  assert (!malformed_call_provider_calls = 1);
+  assert (!lookup_tool_runs = runs_before_denial)

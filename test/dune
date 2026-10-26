@@ -1,4 +1,4 @@
 (test
  (name test_deuteronomy)
- (libraries deuteronomy deuteronomy_openai lwt.unix yojson ppx_deriving_yojson.runtime)
+ (libraries deuteronomy deuteronomy_orchestra deuteronomy_openai lwt.unix yojson ppx_deriving_yojson.runtime)
  (preprocess (pps ppx_deriving_yojson)))

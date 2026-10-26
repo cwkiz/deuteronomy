@@ -1,5 +1,5 @@
 open Deuteronomy
-open Lwt.Infix
+open Deuteronomy_orchestra.Loop
 
 module Counter_arguments = struct
   type arguments = { text : string } [@@deriving yojson]
@@ -48,72 +48,16 @@ let registry =
       | Ok registry -> registry
       | Error _ -> failwith "agent registration failed")
 
-type run_error =
-  | Registry_error of Registry.error
-  | Provider_error of Connector.error
-  | Tool_error of {
-      call_id : string;
-      error : Registry.invocation_error;
-    }
-  | Step_limit_reached
-
-let run ~(provider : (module Agent.Provider)) registry agent ~max_steps messages =
-  match Registry.tools_for_agent agent registry with
-  | Error error -> Lwt.return (Error (Registry_error error))
-  | Ok tools ->
-      let rec complete remaining messages =
-        if remaining < 1 then Lwt.return (Error Step_limit_reached)
-        else
-          Agent.run ~provider agent ~tools messages >>= function
-          | Error error -> Lwt.return (Error (Provider_error error))
-          | Ok (Connector.Assistant_reply answer) -> Lwt.return (Ok answer)
-          | Ok (Connector.Tool_requests { text; calls }) ->
-              if calls = [] then
-                Lwt.return
-                  (Error
-                     (Provider_error
-                        (Connector.Bad_response "Provider returned no tool calls")))
-              else if remaining = 1 then
-                Lwt.return (Error Step_limit_reached)
-              else
-                let rec invoke_calls results = function
-                  | [] -> Lwt.return (Ok (List.rev results))
-                  | call :: rest ->
-                      Registry.invoke registry ~agent_id:agent.Agent.id
-                        ~tool_id:call.Connector.tool_id
-                        ~arguments:call.arguments
-                      >>= (function
-                       | Error error ->
-                           Lwt.return
-                             (Error
-                                (Tool_error
-                                   { call_id = call.call_id; error }))
-                       | Ok content ->
-                           let result =
-                             Connector.Tool_result
-                               {
-                                 call_id = call.call_id;
-                                 tool_id = call.tool_id;
-                                 content;
-                               }
-                           in
-                           invoke_calls (result :: results) rest)
-                in
-                invoke_calls [] calls >>= function
-                | Error error -> Lwt.return (Error error)
-                | Ok results ->
-                    complete (remaining - 1)
-                      (messages
-                      @ (Connector.Assistant_tool_calls { text; calls }
-                        :: results))
-      in
-      complete max_steps messages
+let permission_check ~agent ~tool =
+  Lwt.return
+    (if agent.Agent.id = "counter" && tool.Tool.id = "count" then Ok ()
+     else Error "This agent is not authorized to use this tool.")
 
 let () =
   match
     Lwt_main.run
-      (run ~provider:(module Deuteronomy_openai.Provider) registry assistant
-         ~max_steps:8
+      (run ~permission_check ~provider:(module Deuteronomy_openai.Provider)
+         registry assistant ~max_steps:8
          [ Connector.User_text "Please count the word hello." ])
   with
   | Ok answer -> Printf.printf "Assistant: %s\n" answer
@@ -133,6 +77,8 @@ let () =
       Printf.eprintf "Tool call %s: agent not found: %s\n" call_id id
   | Error (Tool_error { call_id; error = Registry.Tool_not_allowed { agent_id; tool_id } }) ->
       Printf.eprintf "Tool call %s: agent %s cannot use tool %s\n" call_id agent_id tool_id
+  | Error (Tool_error { call_id; error = Registry.Permission_denied { reason; _ } }) ->
+      Printf.eprintf "Tool call %s denied: %s\n" call_id reason
   | Error (Tool_error { call_id; error = Registry.Tool_not_registered id }) ->
       Printf.eprintf "Tool call %s: tool not registered: %s\n" call_id id
   | Error (Tool_error { call_id; error = Registry.Invalid_arguments message })

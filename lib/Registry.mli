@@ -11,10 +11,21 @@ type invocation_error =
   | Agent_not_found of string
   | Tool_not_allowed of { agent_id : string; tool_id : Tool.id }
   | Tool_not_registered of Tool.id
+  | Permission_denied of {
+      agent_id : string;
+      tool_id : Tool.id;
+      reason : string;
+    }
   | Invalid_arguments of string
   | Tool_failed of string
 
+type permission_check =
+  agent:Agent.agent ->
+  tool:Tool.definition ->
+  (unit, string) result Lwt.t
+
 val empty : t
+val allow_all : permission_check
 
 val add_tool : Tool.implementation -> t -> (t, error) result
 
@@ -28,6 +39,7 @@ val find_agent : string -> t -> Agent.agent option
 val tools_for_agent : Agent.agent -> t -> (Tool.spec list, error) result
 
 val invoke :
+  ?permission_check:permission_check ->
   t ->
   agent_id:string ->
   tool_id:Tool.id ->

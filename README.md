@@ -45,7 +45,7 @@ end
 
 We must now register our tool in the ```Registry``` to eventually be invoked by an agent. The ```Registry``` wraps around a ```Map```, and provides useful definitions and checks to manage multiple tools and agents.
 
-Let us first register our tool, then define an agent that'll use it. Let's match to each error case as well,
+Let us first register our tool, then define an agent that'll use it. Let's match to each error case as well.
 
 ```ocaml
 let counter = Tool.register (module Counter_tool)
@@ -86,6 +86,17 @@ let () =
       Printf.eprintf "Tool failed: %s\n" message
 ```
 
+The agent's ```tools``` list is an allow-list, we can check if an agent is permitted to use a tool at runtime as such:
+
+```ocaml
+let permission_check ~agent ~tool =
+  Lwt.return
+    (if agent.Agent.id = "counter" && tool.Tool.id = "count" then Ok ()
+     else Error "This agent is not authorized to use this tool.")
+```
+
+This is optionally passable to 
+```Registry.invoke``` as ```~permission_check```.
 
 and utilities for the array of ```Messages```, alongside ```Roles``` for usage with providers APIs:
 
