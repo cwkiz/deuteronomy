@@ -1,5 +1,4 @@
 open Deuteronomy
-open Deuteronomy_orchestra.Loop
 
 module Counter_arguments = struct
   type arguments = { text : string }
@@ -43,39 +42,27 @@ let registry =
       | Ok registry -> registry
       | Error _ -> failwith "agent registration failed")
 
-let permission_check ~agent ~tool =
-  Lwt.return
-    (if agent.Agent.id = "counter" && tool.Tool.id = "count" then Ok ()
-     else Error "This agent is not authorized to use this tool.")
-
 let () =
-  match
-    Lwt_main.run
-      (run ~permission_check ~provider:(module Deuteronomy_openai.Provider)
-         registry assistant ~max_steps:8
-         [ Connector.User_text "Please count the word hello." ])
-  with
-  | Ok answer -> Printf.printf "Assistant: %s\n" answer
-  | Error (`Connection_error message) ->
-      Printf.eprintf "Could not connect to provider: %s\n" message
-  | Error (`Provider_error { status_code; message }) ->
-      Printf.eprintf "Provider error";
-      Option.iter (Printf.eprintf " (status %d)") status_code;
-      Printf.eprintf ": %s\n" message
-  | Error (`Bad_response message) ->
-      Printf.eprintf "Unexpected provider response: %s\n" message
-  | Error (`Tool_error (call_id, `Agent_not_found id)) ->
-      Printf.eprintf "Tool call %s: agent not found: %s\n" call_id id
-  | Error (`Tool_error (call_id, `Tool_not_allowed (agent_id, tool_id))) ->
-      Printf.eprintf "Tool call %s: agent %s cannot use tool %s\n" call_id agent_id tool_id
-  | Error (`Tool_error (call_id, `Permission_denied (_, _, reason))) ->
-      Printf.eprintf "Tool call %s denied: %s\n" call_id reason
-  | Error (`Tool_error (call_id, `Tool_not_registered id)) ->
-      Printf.eprintf "Tool call %s: tool not registered: %s\n" call_id id
-  | Error (`Tool_error (call_id, `Invalid_arguments message))
-  | Error (`Tool_error (call_id, `Tool_failed message)) ->
-      Printf.eprintf "Tool call %s failed: %s\n" call_id message
-  | Error `Step_limit_reached ->
-      Printf.eprintf "Agent reached the provider-call limit.\n"
-  | Error _ ->
-      Printf.eprintf "Agent tools are not registered correctly.\n"
+  match Registry.tools_for_agent assistant registry with
+  | Error _ -> Printf.eprintf "Agent tools are not registered correctly.\n"
+  | Ok tools -> (
+      match
+        Lwt_main.run
+          (Agent.run ~provider:(module Deuteronomy_openai.Provider) assistant
+             ~tools
+             (List.to_seq
+                [ Connector.User_text "Please count the word hello." ]))
+      with
+      | Ok (Agent.Assistant_reply answer) ->
+          Printf.printf "Assistant: %s\n" answer
+      | Ok (Agent.Tool_requests { calls; _ }) ->
+          Printf.printf "Assistant requested %d tool call(s).\n"
+            (List.length calls)
+      | Error (`Connection_error message) ->
+          Printf.eprintf "Could not connect to provider: %s\n" message
+      | Error (`Provider_error { status_code; message }) ->
+          Printf.eprintf "Provider error";
+          Option.iter (Printf.eprintf " (status %d)") status_code;
+          Printf.eprintf ": %s\n" message
+      | Error (`Bad_response message) ->
+          Printf.eprintf "Unexpected provider response: %s\n" message)

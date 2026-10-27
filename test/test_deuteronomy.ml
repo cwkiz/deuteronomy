@@ -1,5 +1,4 @@
 open Deuteronomy
-open Deuteronomy_orchestra
 
 module Arguments = struct
   type arguments = { query : string }
@@ -131,65 +130,6 @@ module Openai_provider : Connector.S = Deuteronomy_openai.Provider
 
 let deny_permissions ~agent:_ ~tool:_ =
   Lwt.return (Error "requires approval")
-
-let permission_recovery_provider_calls = ref 0
-
-module Permission_recovery_provider : Connector.S = struct
-  let complete (request : Connector.request) =
-    incr permission_recovery_provider_calls;
-    match !permission_recovery_provider_calls with
-    | 1 ->
-        Lwt.return
-          (Ok
-             (Connector.Tool_requests
-                {
-                  text = None;
-                  calls =
-                    [
-                      {
-                        Connector.call_id = "permission-call";
-                        tool_id = tool.id;
-                        arguments = `Assoc [ ("query", `String "hello") ];
-                      };
-                    ];
-                }))
-    | 2 ->
-        assert (
-          Seq.exists
-            (function
-              | Connector.Tool_result
-                  { call_id; content; tool_id = result_tool_id } ->
-                  call_id = "permission-call"
-                  && result_tool_id = tool.id
-                  && content = "Agent: Permission denied: requires approval"
-              | _ -> false)
-            request.messages);
-        Lwt.return (Ok (Connector.Assistant_reply "recovered"))
-    | _ ->
-        Lwt.return
-          (Error (`Bad_response "unexpected provider call"))
-end
-
-let malformed_call_provider_calls = ref 0
-
-module Malformed_call_provider : Connector.S = struct
-  let complete (_request : Connector.request) =
-    incr malformed_call_provider_calls;
-    Lwt.return
-      (Ok
-         (Connector.Tool_requests
-            {
-              text = None;
-              calls =
-                [
-                  {
-                    Connector.call_id = "invalid-call";
-                    tool_id = tool.id;
-                    arguments = `Assoc [ ("query", `Int 4) ];
-                  };
-                ];
-            }))
-end
 
 let agent : Agent.agent =
   {
@@ -528,25 +468,3 @@ let () =
     (Registry.invoke ~permission_check:deny_permissions with_agent
        ~agent_id:agent.id ~tool_id:tool.id ~arguments);
   assert (!lookup_tool_runs = runs_before_denial);
-
-  permission_recovery_provider_calls := 0;
-  assert (
-    Lwt_main.run
-      (Loop.run ~permission_check:deny_permissions
-         ~provider:(module Permission_recovery_provider) with_agent agent
-         ~max_steps:3 [ Connector.User_text "hello" ])
-    = Ok "recovered");
-  assert (!permission_recovery_provider_calls = 2);
-  assert (!lookup_tool_runs = runs_before_denial);
-
-  malformed_call_provider_calls := 0;
-  (match
-     Lwt_main.run
-       (Loop.run ~provider:(module Malformed_call_provider) with_agent
-          agent ~max_steps:3 [ Connector.User_text "hello" ])
-   with
-  | Error (`Tool_error ("invalid-call", `Invalid_arguments _)) ->
-      ()
-  | _ -> failwith "Malformed tool arguments should abort the agent loop");
-  assert (!malformed_call_provider_calls = 1);
-  assert (!lookup_tool_runs = runs_before_denial)

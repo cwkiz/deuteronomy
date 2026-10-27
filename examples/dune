@@ -1,3 +1,3 @@
 (executable
  (name agent)
- (libraries deuteronomy deuteronomy_orchestra deuteronomy_openai lwt.unix yojson))
+ (libraries deuteronomy deuteronomy_openai lwt.unix yojson))
